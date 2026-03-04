@@ -1,0 +1,14 @@
+# Node
+node_modules/
+
+# add to .gitignore at repo root
+terraform/.terraform/
+*.tfstate
+*.tfstate.backup
+
+# Secrets
+*.pem
+
+# OS
+.DS_Store
+Thumbs.db
