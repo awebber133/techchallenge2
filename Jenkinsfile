@@ -6,7 +6,7 @@ pipeline {
 
   environment {
 
-    ECR_REPO = '238845559349.dkr.ecr.us-east-1.amazonaws.com/<app-repository>'
+    ECR_REPO = '238845559349.dkr.ecr.us-east-1.amazonaws.com/devops-challenge2'
 
     IMAGE_TAG = "${env.BUILD_ID}"
 
