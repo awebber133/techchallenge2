@@ -22,7 +22,7 @@ pipeline {
 
       steps {
 
-        git branch: 'main', url: '<https://github.com/awebber133/devops-challenge2.git>'
+        git branch: 'main', url: 'https://github.com/awebber133/devops-challenge2.git'
 
       }
 
