@@ -32,10 +32,10 @@ pipeline {
         }
       }
     }
-    
+
     stage('Deploy with Helm') {
       steps {
-        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-creds']]) {
           sh '''
             export AWS_REGION=us-east-2
             export AWS_DEFAULT_REGION=us-east-2
