@@ -46,7 +46,7 @@ pipeline {
             echo "Deploying with Helm..."
             aws eks update-kubeconfig --region $AWS_REGION --name eks-cluster
 
-            helm upgrade --install sunrise-app ./helm-chart \
+            helm upgrade --install sunrise-app ./helm/sunrise-chart \
               --namespace jenkins-deploy --create-namespace \
               --set image.repository=$ECR_REPO \
               --set image.tag=$IMAGE_TAG
