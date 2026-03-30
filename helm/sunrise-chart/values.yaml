@@ -1,11 +1,11 @@
-# Default values for helm-chart.
+# Default values for sunrise-chart.
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
 replicaCount: 1
 
 image:
-  repository: nginx
+  repository: 238845559349.dkr.ecr.us-east-1.amazonaws.com/sunrise-quote-app
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
   tag: "latest"

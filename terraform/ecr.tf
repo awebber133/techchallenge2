@@ -1,5 +1,6 @@
+# ECR Repository
 resource "aws_ecr_repository" "app" {
-  name                 = "${var.project_name}-app"
+  name                 = "app-repository"
   image_tag_mutability = "MUTABLE"
 
   image_scanning_configuration {
@@ -7,29 +8,29 @@ resource "aws_ecr_repository" "app" {
   }
 
   tags = {
-    Name        = "${var.project_name}-app-repo"
-    Environment = var.environment
+    Name = "sunrise-app"
   }
 }
 
-resource "aws_ecr_lifecycle_policy" "app" {
+# ECR Repository Policy
+resource "aws_ecr_repository_policy" "app" {
   repository = aws_ecr_repository.app.name
 
   policy = jsonencode({
-    rules = [
+    Version = "2012-10-17"
+    Statement = [
       {
-        rulePriority = 1
-        description  = "Keep last 5 images"
-        selection = {
-          tagStatus     = "tagged"
-          tagPrefixList = ["v"]
-          countType     = "imageCountMoreThan"
-          countNumber   = 5
+        Sid    = "AllowPullFromEKS"
+        Effect = "Allow"
+        Principal = {
+          AWS = aws_iam_role.eks_node_group.arn
         }
-        action = {
-          type = "expire"
-        }
+        Action = [
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ecr:BatchCheckLayerAvailability"
+        ]
       }
     ]
   })
-}
+} 

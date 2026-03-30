@@ -1,107 +1,244 @@
-
-resource "aws_iam_role_policy_attachment" "eks_worker_node" {
-  role       = aws_iam_role.eks_node_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
-}
-
-resource "aws_iam_role_policy_attachment" "eks_cni" {
-  role       = aws_iam_role.eks_node_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
-}
-
-resource "aws_iam_role_policy_attachment" "eks_ecr" {
-  role       = aws_iam_role.eks_node_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
-}
-
-# NAT Gateway for private subnets
-resource "aws_eip" "nat" {
-  domain = "vpc"
-
-  tags = {
-    Name = "sunrise-nat-eip"
-  } 
-}
- 
-resource "aws_nat_gateway" "main" {
-  allocation_id = aws_eip.nat.id
-  subnet_id     = aws_subnet.public[0].id
-  tags = {
-    Name = "sunrise-nat-gateway"
-  }
-}
-
-# Public Route Table
-resource "aws_route_table" "public" {
-  vpc_id = aws_vpc.main.id
-  tags   = { Name = "sunrise-public-rt" }
-}
-
-resource "aws_route" "public_internet" {
-  route_table_id         = aws_route_table.public.id
-  destination_cidr_block = "0.0.0.0/0"
-  gateway_id             = aws_internet_gateway.main.id
-}
-
-resource "aws_route_table_association" "public" {
-  count          = length(aws_subnet.public)
-  subnet_id      = aws_subnet.public[count.index].id
-  route_table_id = aws_route_table.public.id
-}
-
-# Private Route Table
-resource "aws_route_table" "private" {
-  vpc_id = aws_vpc.main.id
-  tags   = { Name = "sunrise-private-rt" }
-}
-
-resource "aws_route" "private_nat" {
-  route_table_id         = aws_route_table.private.id
-  destination_cidr_block = "0.0.0.0/0"
-  nat_gateway_id         = aws_nat_gateway.main.id
-}
-
-resource "aws_route_table_association" "private" {
-  count          = length(aws_subnet.private)
-  subnet_id      = aws_subnet.private[count.index].id
-  route_table_id = aws_route_table.private.id
-}
-
 # EKS Cluster
-resource "aws_eks_cluster" "this" {
-  name     = "sunrise-eks"
-  version  = "1.30"
-  role_arn = aws_iam_role.eks_cluster_role.arn
+resource "aws_eks_cluster" "main" {
+  name     = "eks-cluster"
+  role_arn = aws_iam_role.eks_cluster.arn
+  version  = "1.31"
 
   vpc_config {
-    subnet_ids = aws_subnet.private[*].id
+    subnet_ids              = concat(aws_subnet.private[*].id, aws_subnet.public[*].id)
+    security_group_ids      = [aws_security_group.eks_cluster.id]
+    endpoint_private_access = true
+    endpoint_public_access  = true
   }
 
   depends_on = [
-    aws_iam_role_policy_attachment.eks_cluster_policy,
+    aws_iam_role_policy_attachment.eks_cluster_policy
+  ]
+
+  tags = {
+    Name = "eks-cluster"
+  }
+}
+
+# Security Group for EKS Worker Nodes
+resource "aws_security_group" "eks_worker" {
+  name        = "eks-worker-sg"
+  description = "Security group for EKS worker nodes"
+  vpc_id      = aws_vpc.main.id
+
+  # Allow all traffic from the EKS cluster
+  ingress {
+    from_port       = 0
+    to_port         = 0
+    protocol        = "-1"
+    security_groups = [aws_security_group.eks_cluster.id]
+  }
+
+  # Allow node-to-node communication
+  ingress {
+    from_port = 0
+    to_port   = 0
+    protocol  = "-1"
+    self      = true
+  }
+
+  # Allow traffic from ALB
+  ingress {
+    from_port       = 0
+    to_port         = 0
+    protocol        = "-1"
+    security_groups = [aws_security_group.alb.id]
+  }
+
+  # Allow all outbound traffic
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "eks-worker-sg"
+  }
+}
+
+# Security Group for ALB
+resource "aws_security_group" "alb" {
+  name        = "eks-alb-sg"
+  description = "Security group for EKS ALB"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "eks-alb-sg"
+  }
+}
+
+# Launch Template for EKS nodes
+resource "aws_launch_template" "eks_nodes" {
+  name_prefix   = "eks-node-template-"
+  image_id      = "ami-03bc317f1e0c7d6c1"  # Amazon EKS-optimized AMI for 1.31 in us-east-1
+  instance_type = "t3.small"
+
+  block_device_mappings {
+    device_name = "/dev/xvda"
+    ebs {
+      volume_size = 20
+      volume_type = "gp3"
+    }
+  }
+
+  user_data = base64encode(<<-EOF
+#!/bin/bash
+set -ex
+
+# Get instance ID and use it to determine node number
+INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+NODE_NUMBER=$(echo $INSTANCE_ID | cut -d'-' -f2 | cut -c1)
+
+# Bootstrap the node with proper naming
+/etc/eks/bootstrap.sh eks-cluster \
+  --kubelet-extra-args '--node-labels=eks.amazonaws.com/nodegroup=eks-node-group,eks.amazonaws.com/nodegroup-image=ami-03bc317f1e0c7d6c1' \
+  --apiserver-endpoint '${aws_eks_cluster.main.endpoint}' \
+  --b64-cluster-ca '${aws_eks_cluster.main.certificate_authority[0].data}'
+
+# Set the node name
+hostnamectl set-hostname "Worker Node $NODE_NUMBER"
+EOF
+  )
+
+  tag_specifications {
+    resource_type = "instance"
+    tags = {
+      Name = "Worker Node 1"
+    }
+  }
+
+  vpc_security_group_ids = [aws_security_group.eks_worker.id]
+
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  depends_on = [
+    aws_iam_instance_profile.eks_node_group,
+    aws_security_group.eks_worker
   ]
 }
 
+# IAM Instance Profile for EKS Node Group
+resource "aws_iam_instance_profile" "eks_node_group" {
+  name = "eks-node-group-profile"
+  role = aws_iam_role.eks_node_group.name
+}
+
 # EKS Node Group
-resource "aws_eks_node_group" "default" {
-  cluster_name    = aws_eks_cluster.this.name
-  node_group_name = "sunrise-eks-ng"
-  node_role_arn   = aws_iam_role.eks_node_role.arn
+resource "aws_eks_node_group" "main" {
+  cluster_name    = aws_eks_cluster.main.name
+  node_group_name = "eks-node-group"
+  node_role_arn   = aws_iam_role.eks_node_group.arn
   subnet_ids      = aws_subnet.private[*].id
 
   scaling_config {
     desired_size = 1
+    max_size     = 4
     min_size     = 1
-    max_size     = 3
   }
 
-  instance_types = ["t3.small"]
+  # Use CUSTOM AMI type since we're specifying an AMI in the launch template
+  ami_type       = "CUSTOM"
+  capacity_type  = "ON_DEMAND"
 
-  remote_access {
-    ec2_ssh_key = var.key_name
+  # Use launch template
+  launch_template {
+    id      = aws_launch_template.eks_nodes.id
+    version = aws_launch_template.eks_nodes.latest_version
+  }
+
+  # Update strategy
+  update_config {
+    max_unavailable = 1
   }
 
   depends_on = [
-    aws_eks_cluster.this
+    aws_iam_role_policy_attachment.eks_worker_node_policy,
+    aws_iam_role_policy_attachment.eks_cni_policy,
+    aws_iam_role_policy_attachment.ecr_read_only
   ]
+
+  tags = {
+    "k8s.io/cluster-autoscaler/enabled" = "true"
+    "k8s.io/cluster-autoscaler/${aws_eks_cluster.main.name}" = "owned"
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
+
+# Application Load Balancer
+resource "aws_lb" "eks" {
+  name               = "eks-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb.id]
+  subnets            = aws_subnet.public[*].id
+
+  tags = {
+    Name = "eks-alb"
+  }
+}
+
+# Target Group for ALB
+resource "aws_lb_target_group" "eks" {
+  name     = "eks-tg"
+  port     = 80
+  protocol = "HTTP"
+  vpc_id   = aws_vpc.main.id
+
+  health_check {
+    path                = "/"
+    port                = "traffic-port"
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    timeout             = 5
+    interval            = 30
+  }
+
+  tags = {
+    Name = "eks-tg"
+  }
+}
+
+# ALB Listener
+resource "aws_lb_listener" "eks" {
+  load_balancer_arn = aws_lb.eks.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.eks.arn
+  }
+} 

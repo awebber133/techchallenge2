@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sunrise-chart.fullname" . }}
+  labels:
+    {{- include "sunrise-chart.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "sunrise-chart.name" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "sunrise-chart.name" . }}
+    spec:
+      containers:
+        - name: sunrise-quote-app
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

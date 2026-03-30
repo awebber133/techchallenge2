@@ -1,27 +1,29 @@
-variable "project_name" {
-  default = "sunrise"
+variable "region" {
+  description = "AWS region"
+  type        = string
+  default     = "us-east-1"
 }
 
 variable "environment" {
-  default = "dev"
-}
-
-variable "aws_region" {
-  default = "us-east-2"
+  description = "Environment name"
+  type        = string
+  default     = "dev"
 }
 
 variable "cluster_name" {
-  default = "sunrise-eks"
+  description = "Name of the EKS cluster"
+  type        = string
+  default     = "eks-cluster"
 }
 
-variable "vpc_cidr" {
-  default = "10.0.0.0/16"
+variable "node_group_name" {
+  description = "Name of the EKS node group"
+  type        = string
+  default     = "eks-node-group"
 }
 
-variable "app_image" {
-  description = "Docker image for app"
-}
-
-variable "key_name" {
-  description = "Existing EC2 key pair name"
-}
+variable "node_name_pattern" {
+  description = "Pattern for naming EKS worker nodes"
+  type        = string
+  default     = "EKS-App-Worker Node"
+} 
