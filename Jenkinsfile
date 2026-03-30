@@ -29,4 +29,26 @@ pipeline {
         withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-creds']]) {
           sh '''
             echo "Logging into ECR..."
-            aws ecr get-login
+            aws ecr get-login-password --region $AWS_REGION | \
+              docker login --username AWS --password-stdin $ECR_REPO
+
+            echo "Pushing image to ECR..."
+            docker push $ECR_REPO:$IMAGE_TAG
+          '''
+        }
+      }
+    }
+
+    stage('Deploy with Helm') {
+      steps {
+        sh '''
+          echo "Deploying with Helm..."
+          helm upgrade --install sunrise-app ./helm-chart \
+            --namespace jenkins-deploy --create-namespace \
+            --set image.repository=$ECR_REPO \
+            --set image.tag=$IMAGE_TAG
+        '''
+      }
+    }
+  }
+}
